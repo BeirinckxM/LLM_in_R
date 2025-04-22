@@ -1,0 +1,114 @@
+---
+title: "LLMs in R with ollamaR and Mall"
+author: "MB"
+format: html
+df-print: default
+editor: visual
+output-dir: docs
+---
+
+# Import libraries
+
+```{r}
+#| message: false
+#| warning: false
+library(ollamar)
+library(tidyverse)
+library(mall)
+```
+
+# Initialize OllamaR
+
+For this to work you'll need to start the ollama client on your device.
+We'll be using google's gemma3 1B model which you can pull via the Ollama CLI.
+
+```{r}
+#| message: false
+#| warning: false
+ollamar::test_connection()
+ollamar::list_models()
+```
+
+# Generate patient reports
+
+I will try to create some made up hospital reports that we can use to test data retrieval.
+Setting temperature of the LLM higher will get you more diverse reports.
+
+```{r}
+
+patient_ids <- sprintf("LLM%02d", 1:5)
+patients <- tibble(patient_ids = patient_ids)
+
+
+mall::llm_use("ollama", "gemma3:1b", .silent = TRUE, temperature = 5)
+
+LLM_systemprompt <- "You are a trained medic.
+Answer only the question. Do not explain your reasoning. 
+Limit your answer to 100 words maximum and only allow alphanumeric characters:"
+
+start_time <- Sys.time()
+
+patients <- patients |>
+            mall::llm_custom(
+                  patient_ids,
+                  prompt = paste(LLM_systemprompt,
+                                 "Generate a fictitious hospital report in free text proza 
+                                 for a patient related to the blood pressure of the patient. 
+                                 Please include a made up name, age, sex of the patient 
+                                 and a date on which the patient came in"
+                                 ),
+                  pred_name = "patient_narrative"
+            )
+
+print(Sys.time()-start_time)
+```
+
+```{r}
+#| echo: false
+patients
+```
+
+# Extract info 
+
+For retrieving information we set temperature to zero
+
+```{r}
+start_time <- Sys.time()
+
+mall::llm_use("ollama", "gemma3:1b", .silent = TRUE, temperature = 0)
+
+patients <- patients |> 
+  mutate(patient_narrative = str_to_lower(patient_narrative)) |>
+  mall::llm_custom(patient_narrative,
+  prompt = paste(LLM_systemprompt,
+                 "Given this hospital report on a patient: 
+                 What is the age of the patient? 
+                 Provide only the number."
+                 ),
+  pred_name = "extract_age") |>
+  llm_custom(patient_narrative,
+           prompt = paste(LLM_systemprompt,
+                 "Given this hospital report on a patient: 
+                 What is the sex of the patient? 
+                 Provide only the answer as male, female or other"
+                 ),
+           pred_name = "extract_sex") |>
+  llm_custom(patient_narrative,
+           prompt = paste(LLM_systemprompt,
+                 "Given this hospital report on a patient: 
+                 When did the patient come in into the hospital? 
+                 Provide the date"
+                 ),
+           pred_name = "extract_date")
+
+print(Sys.time()-start_time)
+```
+
+The model seems to take some of the birth dates as the date the patient came in into the hospital.
+When a date is incomplete it seems to complete it with the date at the time of the models creation?
+
+```{r}
+#| echo: false
+patients
+```
+
